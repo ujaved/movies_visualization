@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style type="text/css">
+
+svg {
+  font-family: "Helvetica Neue", Helvetica;
+}
+
+.line {
+  fill: none;
+  stroke: #000;
+  stroke-width: 1px;
+}
+
+.axis path,
+.axis line {
+    fill: none;
+    stroke: none;
+    shape-rendering: crispEdges;
+}
+.axis text {
+    font-family: Helvetica;
+    font-size: 10px;
+}
+
+.brush .extent {
+  stroke: #fff;
+  fill-opacity: .125;
+  shape-rendering: crispEdges;
+}
+
+/*
+#metric {
+        position: absolute;
+        left:1050px;
+        top:180px;
+        width: auto;
+        height: auto;
+}
+
+#agg {
+        position: absolute;
+        left:1050px;
+        top:220px;
+        width: auto;
+        height: auto;
+}
+
+#metricText {
+        position: absolute;
+        left:1050px;
+        top:75px;
+        width: auto;
+        height: auto;
+}
+
+
+#aggText {
+        position: absolute;
+        left:1050px;
+        top:100px;
+        width: auto;
+        height: auto;
+}
+*/
+
+#info {
+        margin-right:50px;
+        position: absolute;
+        left:1000px;
+        top:75px;
+        width: auto;
+        height: auto;
+}
+
+#tooltip {
+        position: absolute;
+        left:670px;
+        top:70px;
+        width: auto;
+        height: auto;
+        padding: 10px;
+        background-color: white;
+        -webkit-border-radius: 10px;
+        -moz-border-radius: 10px;
+        border-radius: 10px;
+        -webkit-box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.4);
+        -moz-box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.4);
+        box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.4);
+        pointer-events: none;
+}
+
+#tooltip.hidden {
+        display: none;
+}
+
+#tooltip p {
+        margin: 0;
+        font-family: sans-serif;
+        font-size: 16px;
+        line-height: 20px;
+}
+
+</style>
+<body>
+
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<h1>Visualizing Half-a-Century of Movie Statistics</h1>
+
+<aside id="info">
+<p id="metricText">Attribute: &nbsp 
+  <select id="metric">
+  <option value="count">Movie Count</option>
+  <option value="usGross">US Gross</option>
+  <option value="wwGross">Worldwide Gross</option>
+<!--   <option value="dvd">US DVD Sales</option>
+ -->  <option value="prod">Production Budget</option>
+  <option value="imdb">IMDB Rating</option>
+  <option value="tomatoes">Rotten Tomatoes Rating</option>
+</select>
+
+<p id="aggText">Aggregate: 
+  <select id="agg">
+  <option value="sum">Sum</option>
+  <option value="median">Median</option>
+  <option value="mean">Mean</option>
+</select>
+
+<p> The topmost stacked area chart displays normalized aggregate movie statistics. The bottom area chart displays the same non-normalized data.
+
+<p>Each colored layer represents a movie genre.
+
+<p>Use the drop-down menu to select the attribute and aggregate function of your choice. You can also select a time period of interest in the bottom area chart.
+
+</aside>
+
+<div id="tooltip" class="hidden">
+        <p><span id="value">100</span></p>
+</div>
+
+<script>
+
+//style="margin-top:50px;"
+
+var m  = [10, 160, 100, 10],
+    m2 = [400, m[1], 20, m[3]],
+    w  = 960 - m[1] - m[3],
+    h  = 500 - m[0] - m[2],
+    h2 = 500 - m2[0] - m2[2];
+
+var w_margin = m[1] + m[3],
+    h_margin = m[0] + m[2];
+
+var x = d3.time.scale().range([0, w]),
+    y = d3.scale.linear().range([h, 0]),
+    x2 = d3.time.scale().range([0, w]),
+    y2 = d3.scale.linear().range([h2, 0]),
+    duration = 1500,
+    delay = 500;
+
+
+
+var color = d3.scale.category20c();
+
+// X axis
+var xAxis = d3.svg.axis()
+                .scale(x)
+                .orient("bottom")
+                .tickFormat(d3.format(".0f"));
+
+var brush = d3.svg.brush()
+    .x(x2)
+    .on("brush", brushed);
+
+// A area generator
+var area = d3.svg.area()
+    .interpolate("basis")
+    .x(function(d) { return x(d.key); });
+
+var area2 = d3.svg.area()
+    .interpolate("basis")
+    .x(function(d) { return x2(d.key); });
+
+var fcs = d3.select("body").append("svg")
+    .attr("width", w + m[1] + m[3])
+    .attr("height", h + m[0] + m[2] - h2)
+    .append("g")
+      .attr("transform", "translate(" + m[3] + "," + m[0] + ")");
+
+var ctx = d3.select("body").append("svg")
+    .attr("width", w + m2[1] + m2[3])
+    .attr("height", h2 + m2[0] + m2[2] - h)
+    .append("g")
+      .attr("transform", "translate(" + m2[3] + "," + 0 + ")");
+
+function parseDate(d) {
+  var parser = d3.time.format("%d-%b-%y").parse;
+  if (parser(d) == null) {
+    parser = d3.time.format("%B, %Y").parse;
+  }
+  if (parser(d) == null) {
+    parser = d3.time.format("%Y").parse;
+  }
+  return parser(d);
+};
+
+function isValidDate(d) {
+  //d is in Date format
+  var maxDate = d3.time.format("%Y-%m-%d").parse("2010-12-31");
+  var minDate = d3.time.format("%Y-%m-%d").parse("1960-01-01");
+  if ((d==null) || ((+d) > (+maxDate)) || ((+d) < (+minDate))) {
+    return false;
+  }
+  return true;
+}
+
+function isValidGenre(g) {
+  if (g==null || g.length===0) {
+    return false;
+  }
+  return true;
+}
+
+function getAttributeAggregate(year, attribute, aggregate) {
+
+  var r;
+  switch (aggregate) {
+    case 'sum':
+      r = d3.sum(year.values, function(movie) { return ((+movie[attribute])*1.0); });
+      break
+    case 'median':
+      r = d3.median(year.values, function(movie) { return ((+movie[attribute])*1.0); });
+      break;
+    case 'mean':
+      r = d3.mean(year.values, function(movie) { return ((+movie[attribute])*1.0); });
+      break;
+  }
+  if (r===undefined)
+      return 0.0;
+  return r;
+  
+}
+
+var num_genres;
+var dataset;
+var stack, stack2;
+var genre2year2movies;
+var year2genre2movies;
+var dates;
+var genres;
+var year2movies;
+
+d3.csv("movies.csv", function (data) {
+  dataset = [];
+  dates = new Object();
+  genres = new Object();
+  year2movies = new Object();
+  data.forEach(function(d) {
+    var date = parseDate(d['Release Date']);
+    if (isValidDate(date) && isValidGenre(d['Major Genre'])) {
+      d.year = +date.getFullYear();
+      dates[d.year] = true;
+      genres[d['Major Genre']] = true;
+      dataset.push(d);
+
+      if (!(d.year in year2movies))
+        year2movies[d.year] = [];
+      year2movies[d.year].push(d);
+    }
+  });
+
+  dates = d3.keys(dates);
+  genres = d3.keys(genres);
+
+  // Nest count values by genre.
+  genre2year2movies = d3.nest()
+      .key(function(d) { return d['Major Genre']; })
+      .key(function(d) { return d.year; })
+      .entries(dataset);
+
+  year2genre2movies = d3.nest()
+      .key(function(d) { return d.year; })
+      .key(function(d) { return d['Major Genre']; })
+      .entries(dataset);
+  
+  genre2year2movies.forEach(function(g) {
+    for (var i = 0; i < dates.length; i++) {
+      d = dates[i];
+      var exists = false;
+      for (var j = 0; j < g.values.length; j++) {
+        if (g.values[j].key==d) {
+          exists = true;
+          break;
+        }
+      }
+      if (!exists) {
+        var nullYear = new Object();
+        nullYear.key = d;
+        nullYear.values = [];
+        g.values.push(nullYear);
+      }
+    }
+    g.values.forEach(function(y) {
+      y.count = y.values.length;
+      y.relativeCount = (y.count*1.0)/(year2movies[y.key].length*1.0);
+
+      y.absMetric = y.count;
+      y.metric = y.relativeCount;
+     }
+    )
+    g.values.sort(function(y,z) { return y.key - z.key;});
+  });
+
+  // Number of distinct genres 
+  num_genres = genre2year2movies.length;
+
+  var g = fcs.selectAll("g")
+      .data(genre2year2movies)
+    .enter().append("g")
+      .attr("class", "genre");
+
+  var g2 = ctx.selectAll("g")
+      .data(genre2year2movies)
+    .enter().append("g")
+      .attr("class", "genre");
+
+  stackedArea();
+});
+
+d3.select("#metric").on("change", function() {
+    //clearTimeout(timeout);
+    var agg = d3.select("#agg").node().value;
+    switch (this.value) {
+      case "count":
+          genre2year2movies.forEach(function(g) {
+            g.values.forEach(function(y) {  
+              y.absMetric =  y.count;
+              y.metric = y.relativeCount;
+            });
+          });
+          break;
+
+      case "usGross":
+          updateData('US Gross', agg);
+          break;
+
+      case "wwGross":
+          updateData('Worldwide Gross', agg);
+          break;
+
+      case "dvd":
+          updateData('US DVD Sales', agg);
+          break;
+
+      case "prod":
+          updateData('Production Budget', agg);
+          break;
+
+      case "imdb":
+          updateData('IMDB Rating', agg);
+          break;
+
+      case "tomatoes":
+          updateData('Rotten Tomatoes Rating', agg);
+          break;
+    }
+    updateStackedArea();
+});
+
+d3.select("#agg").on("change", function() {
+    //clearTimeout(timeout);
+    var m = d3.select("#metric").node().value;
+    var metric = "count";
+    switch (m) {
+      case 'usGross':
+        metric = 'US Gross';
+        break;
+      case 'wwGross':
+        metric = 'Worldwide Gross';
+        break;
+      case 'dvd':
+        metric = 'US DVD Sales';
+        break;
+      case 'prod':
+        metric = 'Production Budget';
+        break;
+      case 'imdb':
+        metric = 'IMDB Rating';
+        break;
+      case 'tomatoes':
+        metric = 'Rotten Tomatoes Rating';
+        break;
+    }
+    switch (this.value) {
+      case 'sum':
+          updateData(metric, 'sum');
+          break;
+
+      case 'median':
+          updateData(metric, 'median');
+          break;
+
+      case 'mean':
+          updateData(metric, 'mean');
+          break;
+    }
+    updateStackedArea();
+});
+
+function updateData(attribute, aggregate) {
+  
+  // Update data
+  if (attribute=="count") {
+    genre2year2movies.forEach(function(g) {
+            g.values.forEach(function(y) {    
+              y.metric = y.relativeCount;
+            });
+          });
+    return;
+  }
+  var year2total = new Object();
+  year2genre2movies.forEach(function(y) {
+      var total = d3.sum(y.values, function(g) {
+        switch (aggregate) {
+          case 'sum':
+            return d3.sum(g.values, function(movie) { return ((+movie[attribute])*1.0); });
+          case 'median':
+            return d3.median(g.values, function(movie) { return ((+movie[attribute])*1.0); });
+          case 'mean':
+            return d3.mean(g.values, function(movie) { return ((+movie[attribute])*1.0); });
+        }
+      });
+
+     year2total[y.key] = total;
+  });
+
+  genre2year2movies.forEach(function(g) {
+    g.values.forEach(function(y) {    
+      var unnormalized = getAttributeAggregate(y,attribute,aggregate);
+      if (y.key in year2total) {
+          y.absMetric = unnormalized;
+          y.metric = unnormalized/year2total[y.key];
+      } else {
+          y.absMetric = 0.0;
+          y.metric = 0.0;
+      }
+     });
+  });
+}
+
+function brushed() {
+  x.domain(brush.empty() ? x2.domain() : brush.extent());
+  xAxis.scale(x);
+
+  fcs.select(".axis").call(xAxis);
+
+  fcs.selectAll(".genre").select("path.area")
+      .attr("d", function(d) { return area(d.values); });
+}
+
+function updateStackedArea() {
+  // Update visualization
+  stack = d3.layout.stack()
+    .values(function(genre) { return genre.values; })
+    .x(function(year) { return year.key; })
+    .y(function(year) { return year.metric; })
+    .out(function(year, y0, y) { year.metric0 = y0; })
+    .order("reverse");
+
+  stack2 = d3.layout.stack()
+    .values(function(genre) { return genre.values; })
+    .x(function(year) { return year.key; })
+    .y(function(year) { return year.absMetric; })
+    .out(function(year, y0, y) { year.absMetric0 = y0; })
+    .order("reverse");
+
+  stack(genre2year2movies);
+  stack2(genre2year2movies);
+
+  // Update the y axis domain
+  maxY = d3.max(genre2year2movies, function(g) {
+      return d3.max(g.values, function(y) { return y.metric + y.metric0; });
+  });
+  y.domain([0, maxY]);
+  maxY = d3.max(genre2year2movies, function(g) {
+      return d3.max(g.values, function(y) { return y.absMetric + y.absMetric0; });
+   });
+  y2.domain([0, maxY]);
+
+  area
+      .y0(function(d) { return y(d.metric0); })
+      .y1(function(d) { return y(d.metric0 + d.metric); });
+
+  area2
+      .y0(function(d) { return y2(d.absMetric0); })
+      .y1(function(d) { return y2(d.absMetric0 + d.absMetric); });
+
+  var t = fcs.selectAll(".genre").transition()
+      .duration(duration)
+      .attr("transform", "translate(0,0)")
+      .each("end", function() { d3.select(this).attr("transform", null); });
+
+  t.select("path.area")
+      .attr("d", function(d) { return area(d.values); });
+
+  t.select("text")
+      .attr("transform", function(d) { d = d.values[d.values.length - 1]; return "translate(" + 0 + "," + y(d.metric / 2 + d.metric0) + ")"; });
+
+  var t2 = ctx.selectAll(".genre").transition()
+      .duration(duration)
+      .attr("transform", "translate(0,0)")
+      .each("end", function() { d3.select(this).attr("transform", null); });
+
+  t2.select("path.area")
+      .attr("d", function(d) { return area2(d.values); });
+}
+
+function stackedArea() {
+
+  var legend = fcs.selectAll(".legend")
+            .data(genres)
+            .enter().append("g")
+            .attr("class", "legend")
+            .attr("transform", function(d, i) { return "translate(0," + i * h/num_genres + ")"; });
+
+  legend.append("rect")
+      .attr("x", (w + 5))
+      .attr("width", h/num_genres-2)
+      .attr("height", h/num_genres-2)
+      .style("fill", color);
+
+  
+  legend.append("text")
+      .attr("x", (w + 5 + h/num_genres))
+      .attr("dx", 0)
+      .attr("y", h/num_genres)
+      .attr("dy", -12)
+      .attr("font-family", "sans-serif")
+      .attr("font-size", "13px")
+      .style("text-anchor", "start")
+      .text(function(d) { return d; });
+  
+  stack = d3.layout.stack()
+    .values(function(genre) { return genre.values; })
+    .x(function(year) { return year.key; })
+    .y(function(year) { return year.metric; })
+    .out(function(year, y0, y) { year.metric0 = y0; })
+    .order("reverse");
+
+  stack2 = d3.layout.stack()
+    .values(function(genre) { return genre.values; })
+    .x(function(year) { return year.key; })
+    .y(function(year) { return year.absMetric; })
+    .out(function(year, y0, y) { year.absMetric0 = y0; })
+    .order("reverse");
+
+  stack(genre2year2movies);
+  stack2(genre2year2movies);
+
+  // Update domains
+  minX = d3.min(genre2year2movies, function(g) {
+      return d3.min(g.values, function(y) { return y.key; });
+   });
+  maxX = d3.max(genre2year2movies, function(g) {
+      return d3.max(g.values, function(y) { return y.key; });
+   });
+  x.domain([minX,maxX]);
+  x2.domain([minX,maxX]);
+
+  maxY = d3.max(genre2year2movies, function(g) {
+      return d3.max(g.values, function(y) { return y.metric + y.metric0; });
+   });
+  y.domain([0, maxY]);
+  maxY = d3.max(genre2year2movies, function(g) {
+      return d3.max(g.values, function(y) { return y.absMetric + y.absMetric0; });
+   });
+  y2.domain([0, maxY]);
+
+  var g = fcs.selectAll(".genre");
+
+  var g2 = ctx.selectAll(".genre");
+
+  area
+      .y0(function(d) { return y(d.metric0); })
+      .y1(function(d) { return y(d.metric0 + d.metric); });
+
+  area2
+      .y0(function(d) { return y2(d.absMetric0); })
+      .y1(function(d) { return y2(d.absMetric0 + d.absMetric); });
+
+  g.each(function(d,j) {
+    d3.select(this).selectAll(".area")
+      .data(d3.range(3))
+      .enter().insert("path", ".line")
+      .filter(function(d, i) { return !i; })
+      .attr("class", "area")
+      .attr("d", area(d.values))
+      .style("fill", color(d.key))
+      .on("mouseover", function(d) {
+        //console.log(area(d.values));
+        //console.log(d3.select(this));
+        //console.log(g2[0][j]);
+        //console.log(g2[0][j].childNodes[0].style.fill);
+        //console.log(this);
+        d3.select("#tooltip")
+          .select("#value")
+          .text(d.key); 
+        d3.select("#tooltip").classed("hidden", false);
+        var curColor = this.style.fill;
+        var newColor = Darken(curColor,0.4);
+
+        d3.select(this)
+          .attr("stroke", "black")
+          .attr("stroke-width", 1)
+          .style("fill", newColor);
+
+        d3.select(g2[0][j].childNodes[0])
+          .style("fill", "#e6550d");
+
+      })
+      .on("mouseout", function(d) {
+        d3.select("#tooltip").classed("hidden", true);
+        d3.select(this)
+          .transition()
+          .duration(250)
+          .attr("stroke", "none")
+          .style("fill", color(d.key));
+
+        
+        d3.select(g2[0][j].childNodes[0])
+          .transition()
+          .duration(250)
+          .style("fill", "#c6dbef");
+        
+
+      });
+
+    /*
+    d3.select(this).append("text")
+        .attr("x", (w - m[1] - m[3]))
+        .attr("dx", 4)
+        .attr("dy", 0)
+        .text(d.key)
+        .attr("font-family", "sans-serif")
+        .attr("font-size", "11px")
+        .attr("transform", function(d) { d = d.values[d.values.length - 1]; return "translate(" + 0 + "," + ((y(d.metric / 2 + d.metric0))+5.5) + ")"; });
+        */
+  });
+
+  ctx.append("g")
+      .attr("class", "x brush")
+      .call(brush)
+    .selectAll("rect")
+      .attr("y", -6)
+      .attr("height", h2 + 7);
+
+  g2.each(function(d) {
+
+    d3.select(this).selectAll(".area")
+      .data(d3.range(3))
+      .enter().insert("path", ".line")
+      .filter(function(d, i) { return !i; })
+      .attr("class", "area")
+      .attr("d", area2(d.values))
+      .style("fill", "#c6dbef");
+
+  });
+
+  g.select("path.area")
+     .attr("d", function(d) { return area(d.values); });
+
+  g2.select("path.area")
+     .attr("d", function(d) { return area2(d.values); });
+
+  fcs.append("g")
+    .attr("class", "axis")
+    .attr("transform", "translate(0," + h + ")")
+    .call(xAxis);
+
+  ctx.append("g")
+    .attr("class", "axis")
+    .attr("transform", "translate(0," + h2 + ")")
+    .call(xAxis);
+}
+
+function Darken(hexColor, factor)
+    {   
+        if ( factor < 0 ) factor = 0;
+
+        var c = hexColor;
+        if ( c.substr(0,1) == "#" )
+        {
+            c = c.substring(1);
+        }
+
+        if ( c.length == 3 || c.length == 6 )
+        {
+            var i = c.length / 3;
+
+            var f;  // the relative distance from white
+
+            var r = parseInt( c.substr(0, i ), 16 );
+            f = ( factor * r / (256-r) );
+            r = Math.floor((256 * f) / (f+1));
+
+            r = r.toString(16);
+            if ( r.length == 1 ) r = "0" + r;
+
+            var g = parseInt( c.substr(i, i), 16);
+            f = ( factor * g / (256-g) );
+            g = Math.floor((256 * f) / (f+1));
+            g = g.toString(16);
+            if ( g.length == 1 ) g = "0" + g;
+
+            var b = parseInt( c.substr( 2*i, i),16 );
+            f = ( factor * b / (256-b) );
+            b = Math.floor((256 * f) / (f+1));
+            b = b.toString(16);
+            if ( b.length == 1 ) b = "0" + b;
+
+            c =  r+g+b;
+         }   
+
+         return "#" + c;
+
+    }
+
+</script>
